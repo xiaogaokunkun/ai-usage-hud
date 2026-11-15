@@ -222,11 +222,16 @@ class Details(GlassWindow):
         self.quota_updated.setText(('额度数据已过期 · ' if stale and any(usage.get(k) for k in ('five_hour','weekly')) else '额度未获取 · ' if not any(usage.get(k) for k in ('five_hour','weekly')) else '额度更新 ')+(time.strftime('%H:%M:%S',time.localtime(stamp)) if stamp else '等待刷新'))
         self.quota_updated.setToolTip(usage.get('error') or ('Codex 官方额度接口' if usage.get('source')=='codex_app_server' else '本机历史额度记录'))
     def position_next_to(self,rail):
-        if self.dock.dock_edge:self.dock.ensure_reachable();return
-        if self.profile.get('follow',True):
-            area=rail.screen().availableGeometry();x=rail.x()+rail.width()+12
-            if x+self.width()>area.right()+1:x=rail.x()-self.width()-12
-            self.move(max(area.left(),min(x,area.right()-self.width()+1)),max(area.top(),min(rail.y()+(rail.height()-self.height())//2,area.bottom()-self.height()+1)))
+        # Details is anchored to the rail: it is never docked to a screen edge
+        # on its own and never stays where it was dragged to. Any old config
+        # (follow=False, dock_edge set by an earlier drag) is reset here.
+        self.profile['follow']=True
+        if self.dock.dock_edge:
+            self.dock.animation.stop();self.dock.timer.stop()
+            self.dock.dock_edge=None;self.dock.hidden=False
+        area=rail.screen().availableGeometry();x=rail.x()+rail.width()+12
+        if x+self.width()>area.right()+1:x=rail.x()-self.width()-12
+        self.move(max(area.left(),min(x,area.right()-self.width()+1)),max(area.top(),min(rail.y()+(rail.height()-self.height())//2,area.bottom()-self.height()+1)))
     def open_next_to(self,rail):
         if self.isVisible():return
         self.position_next_to(rail);self.refresh_labels();self.open_animation.stop();self.setWindowOpacity(0.)
@@ -342,7 +347,13 @@ class Controller(QObject):
         self.refreshing=threading.Lock();self.quota_lock=threading.Lock();self.core=load_core()
         self.codex_usage={'status':'unavailable','fetched_at':None,'source':None,'five_hour':None,'weekly':None,'error':None}
         self.details=Details(self);self.hud=HUD(self)
+        # Details is anchored to the rail, not an independently movable window:
+        # discard any docked / detached position saved by an earlier version.
+        self.details.profile['follow']=True;self.details.profile['dock_edge']=None
+        self.details.dock.dock_edge=None;self.details.dock.hidden=False
         for w in (self.hud,self.details):w.move(w.profile['x'],w.profile['y']);w.dock.restore()
+        # restore() above may re-attach a docked rail; details must not keep one.
+        self.details.dock.dock_edge=None;self.details.dock.hidden=False
         self.hud.show();self.hud.dock.restore();self.data_ready.connect(self.hud.refresh_labels);self.quota_ready.connect(self.update_usage);app.installEventFilter(self)
         self.poll=QTimer(self);self.poll.timeout.connect(self.refresh_balances)
         self.quota_poll=QTimer(self);self.quota_poll.timeout.connect(self.refresh_quota)
@@ -441,13 +452,15 @@ class Controller(QObject):
             if isinstance(obj,(QAbstractButton,QSlider,QComboBox,QSizeGrip,QSpinBox,QScrollBar)):return False
             if obj.parentWidget() and isinstance(obj.parentWidget(),(QComboBox,QSpinBox)):return False
             if self.cfg['locked']:return False
+            # Details is anchored to the rail and is not draggable at all.
+            if window.role=='details':return False
             self.hud.leave_timer.stop();window.dock.animation.stop();window.dock.timer.stop()
             self.drag=(window,event.globalPosition().toPoint()-window.pos());return True
         if kind==QEvent.Type.MouseMove and self.drag:
             w,offset=self.drag;w.move(event.globalPosition().toPoint()-offset);return True
         if kind==QEvent.Type.MouseButtonRelease and self.drag:
             w=self.drag[0];self.drag=None
-            if w.role=='details':w.profile['follow']=False
+            if w.role!='details':w.profile['follow']=False
             w.dock.finish_drag();w.persist();self.hud.schedule_hide();return True
         return False
 

@@ -176,23 +176,60 @@ def automatic_hide_checks():
         h.dock._hide(); finish_animation(h.dock)
         check('locked rail automatic leave still half hides', h.dock.hidden)
         controller.cfg['locked'] = False
+        # Details is anchored to the rail: it must not dock to a screen edge
+        # on its own, even when an old config says follow=False.
         apply(d, '圆角', 312, 360)
-        d.show(); d.profile['follow'] = False
-        d.move(area.right() - d.width() + 9, area.top() + 50)
-        d.dock.finish_drag(); finish_animation(d.dock)
-        d.dock.reveal(); finish_animation(d.dock)
-        h.maybe_hide_details()
-        check('leaving docked detail keeps native window visible', d.isVisible() and d.dock.timer.isActive())
-        d.dock.timer.stop(); d.dock._hide(); finish_animation(d.dock)
-        check('docked detail leave half hides rather than disappears', d.isVisible() and d.dock.hidden)
-        d.dock.reveal(); finish_animation(d.dock)
-        check('docked detail hover restores full window', d.isVisible() and not d.dock.hidden)
+        d.profile['follow'] = False; d.profile['dock_edge'] = 'right'; d.dock.dock_edge = 'right'
+        d.show(); d.position_next_to(h); pump()
+        check('anchored detail ignores old detached/docked state', d.profile['follow'] and not d.dock.dock_edge)
+        area = h.screen().availableGeometry()
+        expected_x = h.x() + h.width() + 12
+        if expected_x + d.width() > area.right() + 1: expected_x = h.x() - d.width() - 12
+        check('anchored detail sits next to rail', d.x() == max(area.left(), min(expected_x, area.right() - d.width() + 1)))
     finally:
         geometry.QCursor = old_geometry_cursor
         globals()['QCursor'] = old_main_cursor
         for window, method in old_under_mouse: window.underMouse = method
         for window in (h, d): window.dock.timer.stop(); window.dock.animation.stop()
         controller.cfg['locked'] = False
+
+
+def anchored_details_checks():
+    controller.cfg['locked'] = False
+    apply(h, '圆角', 68, 252); apply(d, '圆角', 312, 360)
+    h.move(200, 200); pump()
+    d.hide(); d.open_next_to(h); pump()
+    area = h.screen().availableGeometry()
+    expected_x = h.x() + h.width() + 12
+    if expected_x + d.width() > area.right() + 1: expected_x = h.x() - d.width() - 12
+    expected_x = max(area.left(), min(expected_x, area.right() - d.width() + 1))
+    expected_y = max(area.top(), min(h.y() + (h.height() - d.height()) // 2, area.bottom() - d.height() + 1))
+    check('details opens anchored next to rail', d.isVisible() and d.x() == expected_x and d.y() == expected_y,
+          [d.x(), d.y(), expected_x, expected_y])
+    # Attempting to drag the details window must not move it.
+    before = d.geometry()
+    local = QPointF(d.content.geometry().center())
+    global_point = QPointF(d.mapToGlobal(local.toPoint()))
+    for kind, point, button, buttons in (
+        (QEvent.Type.MouseButtonPress, global_point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton),
+        (QEvent.Type.MouseMove, global_point + QPointF(100, 100), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton),
+        (QEvent.Type.MouseButtonRelease, global_point + QPointF(100, 100), Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)):
+        event = QMouseEvent(kind, local, point, button, buttons, Qt.KeyboardModifier.NoModifier)
+        QApplication.sendEvent(d, event)
+    pump()
+    check('details cannot be dragged', d.geometry() == before and controller.drag is None)
+    # Moving the rail moves the anchored details with it. Derive the expected
+    # position from the screen geometry, as position_next_to() does: side
+    # flips left when there is no room on the right, and both axes clamp.
+    h.move(400, 300); pump()
+    area = h.screen().availableGeometry()
+    expected_x = h.x() + h.width() + 12
+    if expected_x + d.width() > area.right() + 1: expected_x = h.x() - d.width() - 12
+    expected_x = max(area.left(), min(expected_x, area.right() - d.width() + 1))
+    expected_y = max(area.top(), min(h.y() + (h.height() - d.height()) // 2, area.bottom() - d.height() + 1))
+    check('details follows rail when rail moves', d.x() == expected_x and d.y() == expected_y,
+          [d.x(), d.y(), expected_x, expected_y])
+    d.hide(); pump()
 
 
 def lock_checks():
@@ -297,6 +334,7 @@ def run_checks():
     try:
         for name, function in [('defaults', basic_checks), ('shapes', shape_checks),
                                ('docking', docking_checks), ('screens', screen_checks), ('automatic hiding', automatic_hide_checks),
+                               ('anchored details', anchored_details_checks),
                                ('locking', lock_checks), ('settings', settings_checks),
                                ('minimum sizes', minimum_checks), ('quota', quota_checks), ('reset', reset_checks)]:
             group(name, function)
