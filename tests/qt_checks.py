@@ -199,7 +199,13 @@ def anchored_details_checks():
     apply(h, '圆角', 68, 252); apply(d, '圆角', 312, 360)
     h.move(200, 200); pump()
     d.hide(); d.open_next_to(h); pump()
-    check('details opens anchored next to rail', d.isVisible() and d.x() == 200 + 68 + 12)
+    area = h.screen().availableGeometry()
+    expected_x = h.x() + h.width() + 12
+    if expected_x + d.width() > area.right() + 1: expected_x = h.x() - d.width() - 12
+    expected_x = max(area.left(), min(expected_x, area.right() - d.width() + 1))
+    expected_y = max(area.top(), min(h.y() + (h.height() - d.height()) // 2, area.bottom() - d.height() + 1))
+    check('details opens anchored next to rail', d.isVisible() and d.x() == expected_x and d.y() == expected_y,
+          [d.x(), d.y(), expected_x, expected_y])
     # Attempting to drag the details window must not move it.
     before = d.geometry()
     local = QPointF(d.content.geometry().center())
@@ -212,9 +218,17 @@ def anchored_details_checks():
         QApplication.sendEvent(d, event)
     pump()
     check('details cannot be dragged', d.geometry() == before and controller.drag is None)
-    # Moving the rail moves the anchored details with it.
+    # Moving the rail moves the anchored details with it. Derive the expected
+    # position from the screen geometry, as position_next_to() does: side
+    # flips left when there is no room on the right, and both axes clamp.
     h.move(400, 300); pump()
-    check('details follows rail when rail moves', d.x() == 400 + 68 + 12 and d.y() == 300 + (252 - 360) // 2)
+    area = h.screen().availableGeometry()
+    expected_x = h.x() + h.width() + 12
+    if expected_x + d.width() > area.right() + 1: expected_x = h.x() - d.width() - 12
+    expected_x = max(area.left(), min(expected_x, area.right() - d.width() + 1))
+    expected_y = max(area.top(), min(h.y() + (h.height() - d.height()) // 2, area.bottom() - d.height() + 1))
+    check('details follows rail when rail moves', d.x() == expected_x and d.y() == expected_y,
+          [d.x(), d.y(), expected_x, expected_y])
     d.hide(); pump()
 
 
